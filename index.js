@@ -3,6 +3,7 @@ const app = express();
 const port = 5000;
 const cors = require('cors');
 require('dotenv').config();
+// import { ObjectId } from 'mongodb';
 
     // Stripe Configuration
     const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY); 
@@ -62,7 +63,7 @@ async function run() {
     const recipescollection = database.collection("recipes");
     const paymentsCollection = database.collection("payments");
     const usersCollection = database.collection("user");
-
+    const likesCollection = database.collection("likes");
     // ==========================================
     // ১. ইউজারের মোট রেসিপি সংখ্যা ও কারেন্ট প্ল্যান চেক করার API
     // ==========================================
@@ -401,6 +402,167 @@ app.delete('/api/my-recipes/:id', async (req, res) => {
         res.status(500).send({ error: "Could not retrieve recipe details." });
       }
     });
+
+
+// ১. ফেভারিট লিস্টে যোগ করা অথবা অলরেডি থাকলে রিমুভ করা (Toggle Feature)
+// এই লাইনটি ফাইলের একদম ওপরে নিশ্চিত করুন
+
+// ==========================================
+// ৮. ফেভারিট লিস্টে যোগ করা অথবা রিমুভ করা (POST) - FIXED
+// ==========================================
+app.post('/api/favorites', async (req, res) => {
+  try {
+    const { userId, recipeId } = req.body;
+    
+    if (!userId || !recipeId) {
+      return res.status(400).send({ success: false, message: "userId and recipeId are required" });
+    }
+
+    // ✅ 'db' পরিবর্তন করে 'database' করা হলো
+    const favoritesCollection = database.collection("favorites");
+
+    // ডেটাবেজে খোঁজার জন্য অবজেক্ট তৈরি
+    const query = { userId: userId, recipeId: recipeId };
+    const existingFavorite = await favoritesCollection.findOne(query);
+
+    if (existingFavorite) {
+      // যদি অলরেডি থাকে, রিমুভ করবে
+      await favoritesCollection.deleteOne(query);
+      return res.status(200).send({ success: true, message: "Removed from favorites", isFavorite: false });
+    } else {
+      // যদি না থাকে, নতুন এড করবে
+      await favoritesCollection.insertOne({ 
+        userId, 
+        recipeId, 
+        createdAt: new Date() 
+      });
+      return res.status(201).send({ success: true, message: "Added to favorites", isFavorite: true });
+    }
+  } catch (error) {
+    console.error("Favorite POST Error:", error);
+    res.status(500).send({ success: false, message: "Server error occurred", error: error.message });
+  }
+});
+
+// ==========================================
+// ৯. ফেভারিট গেট রুট (GET) - FIXED
+// ==========================================
+app.get('/api/favorites/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    // ✅ 'db' পরিবর্তন করে 'database' করা হলো
+    const favoritesCollection = database.collection("favorites");
+
+    // মঙ্গোডিবি Aggregation পাইপলাইন
+    const userFavorites = await favoritesCollection.aggregate([
+      { $match: { userId: userId } },
+      {
+        $addFields: {
+          recipeObjectId: { $toObjectId: "$recipeId" } 
+        }
+      },
+      {
+        $lookup: {
+          from: "recipes", 
+          localField: "recipeObjectId",
+          foreignField: "_id",
+          as: "recipeDetails"
+        }
+      },
+      { $unwind: { path: "$recipeDetails", preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 1,
+          userId: 1,
+          recipeId: 1,
+          recipeName: { $ifNull: ["$recipeDetails.recipeName", "Unknown Recipe"] },
+          imageUrl: { $ifNull: ["$recipeDetails.imageUrl", ""] },
+          category: { $ifNull: ["$recipeDetails.category", ""] },
+          difficultyLevel: { $ifNull: ["$recipeDetails.difficultyLevel", ""] },
+          cuisineType: { $ifNull: ["$recipeDetails.cuisineType", ""] }
+        }
+      }
+    ]).toArray();
+
+    res.status(200).send(userFavorites);
+  } catch (error) {
+    console.error("Favorite GET Error:", error);
+    res.status(500).send([]);
+  }
+});
+
+
+
+
+
+
+
+
+// মনে রাখবেন: এরপর নিচে আপনার app.post('/api/likes') এবং app.get('/api/likes/:userId') আগের মতোই থাকবে।
+
+// ১. লাইক টগল করার রাউট (Like / Unlike)
+// ১. লাইক টগল করার রাউট (Like / Unlike) - মঙ্গোডিবি নেটিভ ড্রাইভার দিয়ে সংশোধিত
+app.post('/api/likes', async (req, res) => {
+    try {
+        const { userId, recipeId } = req.body;
+
+        if (!userId || !recipeId) {
+            return res.status(400).json({ success: false, message: "userId and recipeId are required!" });
+        }
+
+        // ডাটাবেজের 'likes' কালেকশনে চেক করা হচ্ছে
+        const query = { userId, recipeId };
+        const existingLike = await likesCollection.findOne(query);
+
+        if (existingLike) {
+            // যদি আগে থেকেই লাইক থাকে, তবে রিমুভ (Unlike) করা হবে
+            await likesCollection.deleteOne(query);
+            return res.status(200).json({ 
+                success: true, 
+                hasLiked: false, 
+                message: "Removed from liked collection" 
+            });
+        } else {
+            // যদি আগে লাইক না থাকে, তবে নতুন লাইক ইনসার্ট করা হবে
+            await likesCollection.insertOne({
+                userId,
+                recipeId,
+                createdAt: new Date()
+            });
+            return res.status(200).json({ 
+                success: true, 
+                hasLiked: true, 
+                message: "Liked successfully" 
+            });
+        }
+    } catch (error) {
+        console.error("Error in POST /api/likes:", error);
+        return res.status(500).json({ success: false, error: "Internal Server Error" });
+    }
+});
+
+// ২. কোনো নির্দিষ্ট ইউজারের সব লাইক করা রেসিপি গেট করার রাউট
+// ২. কোনো নির্দিষ্ট ইউজারের সব লাইক করা রেসিপি গেট করার রাউট
+app.get('/api/likes/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        if (!userId) {
+            return res.status(400).json({ error: "User ID is required" });
+        }
+
+        // টোটাল লাইক লিস্ট অ্যারে আকারে ব্যাক করা হচ্ছে
+        const userLikes = await likesCollection.find({ userId: userId }).toArray();
+        
+        return res.status(200).json(userLikes || []); 
+    } catch (error) {
+        console.error("Error in GET /api/likes/:userId:", error);
+        return res.status(500).json([]); // এরর খেলেও ফাঁকা অ্যারে পাঠাবে যাতে ফ্রন্টএন্ড ক্র্যাশ না করে
+    }
+});
+
+
 
     // MongoDB Ping
     await client.db("admin").command({ ping: 1 });
