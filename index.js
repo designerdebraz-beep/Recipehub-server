@@ -303,42 +303,49 @@ const purchasedCollection = database.collection("purchasedRecipes");
     });
 
     // ২. ইউজারের ইমেইল অনুযায়ী সব কেনা রেসিপি ডাটাবেজ থেকে আনার API (Aggregation Lookup সহ)
-    app.get('/api/purchased-recipes/:email', async (req, res) => {
-      try {
-        const email = req.params.email.toLowerCase().trim();
-        
-        const purchases = await purchasedCollection.aggregate([
-          { $match: { email: email } },
-          {
-            $addFields: {
-              recipeObjectId: { $toObjectId: "$recipeId" }
-            }
-          },
-          {
-            $lookup: {
-              from: "recipes",
-              localField: "recipeObjectId",
-              foreignField: "_id",
-              as: "recipeDetails"
-            }
-          },
-          { $unwind: "$recipeDetails" },
-          {
-            $project: {
-              _id: "$recipeDetails._id",
-              recipeName: "$recipeDetails.recipeName",
-              imageUrl: "$recipeDetails.imageUrl",
-              category: "$recipeDetails.category",
-              cuisineType: "$recipeDetails.cuisineType"
-            }
-          }
-        ]).toArray();
-
-        res.status(200).send(purchases);
-      } catch (error) {
-        res.status(500).json({ error: error.message });
+app.get('/api/purchased-recipes/:email', async (req, res) => {
+  try {
+    const email = req.params.email.toLowerCase().trim();
+    
+    const purchases = await purchasedCollection.aggregate([
+      // ১. ইউজারের ইমেইল অনুযায়ী ফিল্টার করবে
+      { $match: { email: email } },
+      
+      // 🎯 এখানে $group অপারেটরটি বাদ দেওয়া হয়েছে, তাই সব পারচেজ হিস্ট্রিই আসবে
+      {
+        $addFields: {
+          recipeObjectId: { $toObjectId: "$recipeId" }
+        }
+      },
+      // ২. রেসিপি কালেকশনের সাথে জয়েন (Lookup) করা হচ্ছে
+      {
+        $lookup: {
+          from: "recipes",
+          localField: "recipeObjectId",
+          foreignField: "_id",
+          as: "recipeDetails"
+        }
+      },
+      { $unwind: "$recipeDetails" },
+      // ৩. ফ্রন্টএন্ডের জন্য প্রয়োজনীয় ফিল্ডগুলো প্রজেক্ট করা হচ্ছে
+      {
+        $project: {
+          _id: "$recipeDetails._id",
+          recipeName: "$recipeDetails.recipeName",
+          imageUrl: "$recipeDetails.imageUrl",
+          category: "$recipeDetails.category",
+          cuisineType: "$recipeDetails.cuisineType",
+          purchaseDate: "$purchaseDate", // কখন কিনেছে তা ট্র্যাক করার জন্য
+          sessionId: "$sessionId"         // ইউনিক ট্র্যাকিং আইডি
+        }
       }
-    });
+    ]).toArray();
+
+    res.status(200).send(purchases);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 
 
