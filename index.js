@@ -132,40 +132,93 @@ app.get('/api/my-recipes/count', verifyToken, async (req, res) => {
 
 
 
+
+
     // ==========================================
     // ৩. Stripe Checkout Session তৈরির API
     // ==========================================
+    // app.post('/api/create-checkout-session', async (req, res) => {
+    //   try {
+    //     const { price, packageName } = req.body;
+
+    //     const session = await stripe.checkout.sessions.create({
+    //       payment_method_types: ['card'],
+    //       line_items: [
+    //         {
+    //           price_data: {
+    //             currency: 'usd',
+    //             product_data: {
+    //               name: packageName,
+    //               description: 'Lifetime unlimited recipe posting access.',
+    //             },
+    //             unit_amount: Math.round(price * 100), 
+    //           },
+    //           quantity: 1,
+    //         },
+    //       ],
+    //       mode: 'payment',
+    //       // সাকসেস ইউআরএল-এ কুয়েরি প্যারামিটার যুক্ত করা হলো যাতে ফ্রন্টএন্ড সহজে ডিটেক্ট করতে পারে
+    //       success_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/success?payment=success`, 
+    //       cancel_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/payment?payment=cancel`,
+    //     });
+
+    //     res.status(200).json({ id: session.id, url: session.url });
+    //   } catch (error) {
+    //     console.error("Stripe Session Error:", error);
+    //     res.status(500).json({ error: error.message });
+    //   }
+    // });
+
     app.post('/api/create-checkout-session', async (req, res) => {
-      try {
-        const { price, packageName } = req.body;
+  try {
+    const { price, packageName, recipeId, userEmail } = req.body;
 
-        const session = await stripe.checkout.sessions.create({
-          payment_method_types: ['card'],
-          line_items: [
-            {
-              price_data: {
-                currency: 'usd',
-                product_data: {
-                  name: packageName,
-                  description: 'Lifetime unlimited recipe posting access.',
-                },
-                unit_amount: Math.round(price * 100), 
-              },
-              quantity: 1,
+    // ১. কন্ডিশনাল সাকসেস ইউআরএল ম্যাপ করা (রেসিপি পারচেজ বনাম প্রো প্ল্যান আপগ্রেড)
+    let successUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/success?payment=success`;
+    let cancelUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/payment?payment=cancel`;
+
+    if (recipeId) {
+      // যদি রেসিপি পারচেজ হয়, তবে সাকসেস ইউআরএল-এ এক্সট্রা আইডি এবং টাইপ পুশ করা হচ্ছে
+      successUrl += `&type=recipe&session_id={CHECKOUT_SESSION_ID}&recipeId=${recipeId}&email=${userEmail}`;
+      cancelUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/api/recipes/${recipeId}`;
+    }
+
+    const sessionData = {
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: packageName,
+              description: recipeId 
+                ? 'Instant lifetime access to this premium recipe blueprint.' 
+                : 'Lifetime unlimited recipe posting access.',
             },
-          ],
-          mode: 'payment',
-          // সাকসেস ইউআরএল-এ কুয়েরি প্যারামিটার যুক্ত করা হলো যাতে ফ্রন্টএন্ড সহজে ডিটেক্ট করতে পারে
-          success_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/success?payment=success`, 
-          cancel_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/payment?payment=cancel`,
-        });
+            unit_amount: Math.round(price * 100), 
+          },
+          quantity: 1,
+        },
+      ],
+      mode: 'payment',
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+    };
 
-        res.status(200).json({ id: session.id, url: session.url });
-      } catch (error) {
-        console.error("Stripe Session Error:", error);
-        res.status(500).json({ error: error.message });
-      }
-    });
+    // যদি ইমেইল প্রোভাইড করা হয় তবে কাস্টমার ইমেইল অবজেক্ট অ্যাড হবে
+    if (userEmail) {
+      sessionData.customer_email = userEmail;
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionData);
+    res.status(200).json({ id: session.id, url: session.url });
+
+  } catch (error) {
+    console.error("Stripe Session Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 
     // ==================================================
     // ৪. সফল পেমেন্টের পর ট্রানজেকশন সেভ ও প্ল্যান আপডেট API (ACTIVE)
@@ -221,6 +274,74 @@ app.post('/api/payments/confirm', verifyToken, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+
+const purchasedCollection = database.collection("purchasedRecipes");
+
+    // ১. পেমেন্ট সাকসেস হওয়ার পর রেসিপি পারচেজ লিস্টে যোগ করার API
+    app.post('/api/purchased-recipes/confirm', async (req, res) => {
+      try {
+        const { sessionId, recipeId, email } = req.body;
+        
+        // ডুপ্লিকেট এন্ট্রি চেক করা (একই সেশন আইডি বা একই ইউজার একই রেসিপি বারবার যাতে সেভ না হয়)
+        const alreadyPurchased = await purchasedCollection.findOne({ sessionId });
+        if (alreadyPurchased) {
+          return res.status(200).json({ success: true, message: "Already processed" });
+        }
+
+        await purchasedCollection.insertOne({
+          sessionId,
+          recipeId,
+          email: email.toLowerCase().trim(),
+          purchaseDate: new Date()
+        });
+
+        res.status(200).json({ success: true, message: "Purchase confirmed successfully!" });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // ২. ইউজারের ইমেইল অনুযায়ী সব কেনা রেসিপি ডাটাবেজ থেকে আনার API (Aggregation Lookup সহ)
+    app.get('/api/purchased-recipes/:email', async (req, res) => {
+      try {
+        const email = req.params.email.toLowerCase().trim();
+        
+        const purchases = await purchasedCollection.aggregate([
+          { $match: { email: email } },
+          {
+            $addFields: {
+              recipeObjectId: { $toObjectId: "$recipeId" }
+            }
+          },
+          {
+            $lookup: {
+              from: "recipes",
+              localField: "recipeObjectId",
+              foreignField: "_id",
+              as: "recipeDetails"
+            }
+          },
+          { $unwind: "$recipeDetails" },
+          {
+            $project: {
+              _id: "$recipeDetails._id",
+              recipeName: "$recipeDetails.recipeName",
+              imageUrl: "$recipeDetails.imageUrl",
+              category: "$recipeDetails.category",
+              cuisineType: "$recipeDetails.cuisineType"
+            }
+          }
+        ]).toArray();
+
+        res.status(200).send(purchases);
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+
+
 
     // ==========================================
     // ৫. Popular Recipe APIs
