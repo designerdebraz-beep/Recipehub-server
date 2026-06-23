@@ -64,6 +64,7 @@ async function run() {
     const paymentsCollection = database.collection("payments");
     const usersCollection = database.collection("user");
     const likesCollection = database.collection("likes");
+   
     // ==========================================
     // ১. ইউজারের মোট রেসিপি সংখ্যা ও কারেন্ট প্ল্যান চেক করার API
     // ==========================================
@@ -631,46 +632,100 @@ app.get('/api/favorites/:userId', async (req, res) => {
 
 // ১. লাইক টগল করার রাউট (Like / Unlike)
 // ১. লাইক টগল করার রাউট (Like / Unlike) - মঙ্গোডিবি নেটিভ ড্রাইভার দিয়ে সংশোধিত
+// app.post('/api/likes', async (req, res) => {
+//     try {
+//         const { userId, recipeId } = req.body;
+
+//         if (!userId || !recipeId) {
+//             return res.status(400).json({ success: false, message: "userId and recipeId are required!" });
+//         }
+
+//         // ডাটাবেজের 'likes' কালেকশনে চেক করা হচ্ছে
+//         const query = { userId, recipeId };
+//         const existingLike = await likesCollection.findOne(query);
+
+//         if (existingLike) {
+//             // যদি আগে থেকেই লাইক থাকে, তবে রিমুভ (Unlike) করা হবে
+//             await likesCollection.deleteOne(query);
+//             return res.status(200).json({ 
+//                 success: true, 
+//                 hasLiked: false, 
+//                 message: "Removed from liked collection" 
+//             });
+//         } else {
+//             // যদি আগে লাইক না থাকে, তবে নতুন লাইক ইনসার্ট করা হবে
+//             await likesCollection.insertOne({
+//                 userId,
+//                 recipeId,
+//                 createdAt: new Date()
+//             });
+//             return res.status(200).json({ 
+//                 success: true, 
+//                 hasLiked: true, 
+//                 message: "Liked successfully" 
+//             });
+//         }
+//     } catch (error) {
+//         console.error("Error in POST /api/likes:", error);
+//         return res.status(500).json({ success: false, error: "Internal Server Error" });
+//     }
+// });
+
+// 💡 নিশ্চিত হয়ে নিন আপনার ফাইলে এই দুটি ভেরিয়েবল ঠিক এভাবে ডিক্লেয়ার করা আছে কিনা
+// const likesCollection = db.collection("likes");
+// const recipeCollection = db.collection("recipes"); 
+
 app.post('/api/likes', async (req, res) => {
-    try {
-        const { userId, recipeId } = req.body;
+  try {
+    const { userId, recipeId } = req.body;
 
-        if (!userId || !recipeId) {
-            return res.status(400).json({ success: false, message: "userId and recipeId are required!" });
-        }
-
-        // ডাটাবেজের 'likes' কালেকশনে চেক করা হচ্ছে
-        const query = { userId, recipeId };
-        const existingLike = await likesCollection.findOne(query);
-
-        if (existingLike) {
-            // যদি আগে থেকেই লাইক থাকে, তবে রিমুভ (Unlike) করা হবে
-            await likesCollection.deleteOne(query);
-            return res.status(200).json({ 
-                success: true, 
-                hasLiked: false, 
-                message: "Removed from liked collection" 
-            });
-        } else {
-            // যদি আগে লাইক না থাকে, তবে নতুন লাইক ইনসার্ট করা হবে
-            await likesCollection.insertOne({
-                userId,
-                recipeId,
-                createdAt: new Date()
-            });
-            return res.status(200).json({ 
-                success: true, 
-                hasLiked: true, 
-                message: "Liked successfully" 
-            });
-        }
-    } catch (error) {
-        console.error("Error in POST /api/likes:", error);
-        return res.status(500).json({ success: false, error: "Internal Server Error" });
+    if (!userId || !recipeId) {
+      return res.status(400).json({ success: false, message: "userId and recipeId are required" });
     }
+
+    let recipeObjectId;
+    try {
+      recipeObjectId = new ObjectId(recipeId);
+    } catch (idError) {
+      return res.status(400).json({ success: false, message: "Invalid Recipe ID format" });
+    }
+
+    // ১. ইউজার ইতিমধ্যে এই রেসিপিতে লাইক দিয়েছে কি না চেক করুন
+    const existingLike = await likesCollection.findOne({ 
+      userId: userId, 
+      $or: [ { recipeId: recipeId }, { recipeId: recipeObjectId } ]
+    });
+
+    if (existingLike) {
+      // যদি ইতিমধ্যে লাইক দেওয়া থাকে, তবে লাইক ডকুমেণ্টটি রিমুভ (আনলাইক) করুন
+      await likesCollection.deleteOne({ _id: existingLike._id });
+
+      // আপনার আসল কালেকশন recipescollection এ likesCount এর মান ১ কমিয়ে দিন
+      await recipescollection.updateOne(
+        { _id: recipeObjectId },
+        { $inc: { likesCount: -1 } }
+      );
+
+      return res.status(200).json({ success: true, hasLiked: false, message: "Unliked successfully" });
+    } else {
+      // যদি লাইক দেওয়া না থাকে, তবে নতুন লাইক ডকুমেণ্ট যোগ করুন
+      await likesCollection.insertOne({ userId, recipeId, createdAt: new Date() });
+
+      // আপনার আসল কালেকশন recipescollection এ likesCount এর মান ১ বাড়িয়ে দিন
+      await recipescollection.updateOne(
+        { _id: recipeObjectId },
+        { $inc: { likesCount: 1 } }
+      );
+
+      return res.status(200).json({ success: true, hasLiked: true, message: "Liked successfully" });
+    }
+  } catch (error) {
+    console.error("Detailed Like Error:", error); 
+    return res.status(500).json({ success: false, message: error.message });
+  }
 });
 
-// ২. কোনো নির্দিষ্ট ইউজারের সব লাইক করা রেসিপি গেট করার রাউট
+
 // ২. কোনো নির্দিষ্ট ইউজারের সব লাইক করা রেসিপি গেট করার রাউট
 app.get('/api/likes/:userId', async (req, res) => {
     try {
