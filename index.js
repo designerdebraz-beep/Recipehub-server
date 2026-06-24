@@ -817,7 +817,23 @@ app.get('/api/recipes/featured', async (req, res) => {
 });
 
 
+app.get('/api/popular-recipes', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 8;
 
+    // likesCount-এর ওপর ভিত্তি করে বড় থেকে ছোট (Descending) সর্ট করা হচ্ছে
+    // যদি likesCount না থাকে, তবে ডিফল্ট ০ ধরে সর্ট হবে
+    const popularRecipes = await recipescollection
+      .find({})
+      .sort({ likesCount: -1 }) 
+      .limit(limit)
+      .toArray();
+
+    res.status(200).json(popularRecipes);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
     // MongoDB Ping
     await client.db("admin").command({ ping: 1 });
