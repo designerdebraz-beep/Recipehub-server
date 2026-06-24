@@ -67,6 +67,7 @@ async function run() {
     const popularRecipeCollection = database.collection("popularRecipe");
     const featuredRecipesCollection = database.collection("FeaturedRecipes");
     const favoritesCollection = database.collection("favorites");
+    const reportsCollection = database.collection("reports");
    
     // ==========================================
     // ১. ইউজারের মোট রেসিপি সংখ্যা ও কারেন্ট প্ল্যান চেক করার API
@@ -589,9 +590,6 @@ app.get('/api/users', async (req, res) => {
   }
 });
 
-
-
-
     app.patch('/api/users/:userId/status', async (req, res) => {
       try {
         const { userId } = req.params;
@@ -604,6 +602,52 @@ app.get('/api/users', async (req, res) => {
         res.status(500).json({ error: error.message });
       }
     });
+
+
+
+app.post('/api/reports', async (req, res) => {
+  try {
+    const { recipeId, reporterEmail, reason, additionalDetails } = req.body;
+
+    // প্রাথমিক ভ্যালিডেশন চেক
+    if (!recipeId || !reporterEmail || !reason) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Missing required fields (recipeId, reporterEmail, or reason)." 
+      });
+    }
+
+    // MongoDB-তে সেভ করার জন্য অবজেক্ট তৈরি
+    const newReport = {
+      recipeId: new ObjectId(recipeId), // স্ট্রিং আইডি-কে MongoDB ObjectId-তে কনভার্ট করা হলো
+      reporterEmail,
+      reason,
+      additionalDetails: additionalDetails || "", // খালি থাকলে ব্ল্যাঙ্ক স্ট্রিং যাবে
+      status: 'pending',                         // ডিফল্ট স্ট্যাটাস
+      createdAt: new Date()                      // কারেন্ট ডেট অ্যান্ড টাইম
+    };
+
+    // Native Driver এর insertOne ব্যবহার করে ডাটাবেজে সেভ
+    const result = await reportsCollection.insertOne(newReport);
+
+    if (result.insertedId) {
+      return res.status(201).json({
+        success: true,
+        message: "Report submitted successfully and saved to database."
+      });
+    } else {
+      throw new Error("Failed to insert document.");
+    }
+
+  } catch (error) {
+    console.error("Backend Error submitting report:", error);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Internal server error." 
+    });
+  }
+});
+
 
 
 
