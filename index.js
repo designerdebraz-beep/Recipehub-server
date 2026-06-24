@@ -93,7 +93,7 @@ async function run() {
     // ==========================================
 // ইউজারের আইডি অনুযায়ী তার তৈরি সব রেসিপি গেট করার API
 // ==========================================
-app.get('/api/my-recipes/:userId', async (req, res) => {
+app.get('/api/my-recipes/:userId', verifyToken, async (req, res) => {
   try {
     const { userId } = req.params;
     
@@ -579,7 +579,7 @@ app.get('/api/likes/:userId', async (req, res) => {
 // ==========================================
 // ১০. Admin Panel - Get All Users API
 // ==========================================
-app.get('/api/users', async (req, res) => {
+app.get('/api/users', verifyToken, async (req, res) => {
   try {
     // কালেকশন থেকে পাসওয়ার্ড ছাড়া সব ইউজারের ডেটা আনা হচ্ছে
     const result = await usersCollection.find({}).project({ password: 0 }).toArray();
@@ -590,7 +590,7 @@ app.get('/api/users', async (req, res) => {
   }
 });
 
-    app.patch('/api/users/:userId/status', async (req, res) => {
+    app.patch('/api/users/:userId/status', verifyToken, async (req, res) => {
       try {
         const { userId } = req.params;
         const { status } = req.body; 
