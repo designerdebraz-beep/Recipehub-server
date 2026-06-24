@@ -661,7 +661,7 @@ app.get('/api/admin-stats', async (req, res) => {
 
     // ৩. প্রিমিয়াম মেম্বার সংখ্যা (user কালেকশনে যাদের plan === 'premium' বা 'pro')
     // আপনার প্রিমিয়াম ফিল্টারের লজিক অনুযায়ী কুয়েরি পরিবর্তন করতে পারেন
-    const premiumMembers = await usersCollection.countDocuments({ plan: "premium" });
+    const premiumMembers = await usersCollection.countDocuments({ plan: "pro" });
 
     // ৪. পেন্ডিং রিপোর্ট সংখ্যা (reportsCollection থেকে যাদের status === 'pending')
     const pendingReports = await reportsCollection.countDocuments({ status: "pending" });
