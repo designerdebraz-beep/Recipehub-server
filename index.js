@@ -755,6 +755,60 @@ app.delete('/api/recipes/:recipeId', async (req, res) => {
   }
 });
 
+
+// 🚀 ডাটাবেজ থেকে সব পেমেন্ট ট্রানজেকশন কম্বাইন করে নিয়ে আসার API
+app.get('/api/admin/transactions', async (req, res) => {
+  try {
+    // ১. প্রিমিয়াম পেমেন্ট কালেকশন থেকে ডাটা রিড ও ফরম্যাট করা
+    const premiumPayments = await paymentsCollection.find().toArray();
+    const formattedPremium = premiumPayments.map(pay => ({
+      _id: pay._id,
+      user: pay.email,
+      type: "Premium",
+      amount: pay.amount ? `$${pay.amount}` : "$4.99", // ডিফল্ট বা ডাইনামিক অ্যামাউন্ট
+      status: "paid",
+      txnId: pay.transactionId || "N/A",
+      createdAt: pay.createdAt || new Date() // শর্টিং এর জন্য ডেট অবজেক্ট
+    }));
+
+    // ২. রেসিপি পারচেজ কালেকশন থেকে ডাটা রিড ও ফরম্যাট করা
+    const recipePurchases = await purchasedCollection.find().toArray();
+    const formattedRecipes = recipePurchases.map(pay => ({
+      _id: pay._id,
+      user: pay.email,
+      type: "Recipe",
+      amount: "$4.99", // সিঙ্গেল রেসিপির প্রাইস ফিক্সড বা ডাইনামিক রাখতে পারেন
+      status: "paid",
+      txnId: pay.sessionId ? pay.sessionId.substring(0, 20) + "..." : "ST_TX_RECIPE", // সেশন আইডিকে ট্রানজেকশন আইডি হিসেবে ব্যবহার
+      createdAt: pay.createdAt || new Date()
+    }));
+
+    // ৩. ২টি অ্যারে একসাথে মার্জ করে নতুন থেকে পুরাতন ক্রমানুসারে (Descending) সর্ট করা
+    const allTransactions = [...formattedPremium, ...formattedRecipes].sort((a, b) => {
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: allTransactions
+    });
+
+  } catch (error) {
+    console.error("Error fetching transactions:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error while fetching transactions."
+    });
+  }
+});
+
+
+
+
+
+
+
+
     // MongoDB Ping
     await client.db("admin").command({ ping: 1 });
     console.log("Successfully connected to MongoDB!");
