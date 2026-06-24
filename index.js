@@ -8,10 +8,7 @@ require('dotenv').config();
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY); 
 
 // Middleware declarations (Must come BEFORE declaring API routes)
-app.use(cors({
-  origin: ["http://localhost:3000"], // আপনার ফ্রন্টএন্ড ইউআরএল
-  credentials: true
-}));
+app.use(cors());
 app.use(express.json());
 
 app.get('/', (req, res) => {
@@ -56,7 +53,7 @@ const verifyToken = async (req, res, next) => {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
 
     const database = client.db("RecipeHub");
     const recipescollection = database.collection("recipes");
@@ -295,6 +292,66 @@ app.get('/api/my-recipes/:userId', verifyToken, async (req, res) => {
   }
 });
 
+
+// ==========================================
+// ৮. রেসিপি আপডেট (PATCH) - শুধুমাত্র ওনার ডিলিট/আপডেট করতে পারবে
+// ==========================================
+app.patch('/api/my-recipes/:id', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id; // verifyToken থেকে পাওয়া ইউজারের আইডি
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid Recipe ID" });
+    }
+
+    const filter = { _id: new ObjectId(id), userId: userId }; // সিকিউরিটি: নিজের রেসিপি ছাড়া আপডেট হবে না
+    
+    // ডাটাবেজে সেভ করার আগে বডি থেকে কোনো এক্সট্রা আইডি ডিলিট করে নেওয়া ভালো
+    const updateData = { ...req.body };
+    delete updateData._id;
+
+    const result = await recipescollection.updateOne(filter, { $set: updateData });
+    
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "Recipe not found or unauthorized to update" });
+    }
+
+    res.status(200).send({ message: "Updated successfully", result });
+  } catch (error) {
+    res.status(500).send({ error: error.message });
+  }
+});
+
+// ==========================================
+// ৯. রেসিপি ডিলিট (DELETE) - সিকিউরড মেথড
+// ==========================================
+app.delete('/api/my-recipes/:id', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id; // verifyToken থেকে পাওয়া ইউজারের আইডি
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid ID format" });
+    }
+
+    // কুয়েরিতে userId ম্যাচ করা হচ্ছে যাতে অন্য কেউ কারোর রেসিপি ডিলিট করতে না পারে
+    const query = { _id: new ObjectId(id), userId: userId };
+    const result = await recipescollection.deleteOne(query);
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: "Recipe not found or you're not authorized to delete this recipe." });
+    }
+
+    res.status(200).json({ success: true, message: "Deleted successfully from your list" });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+
+
     // ==========================================
     // ৬. Popular & Featured Recipe APIs
     // ==========================================
@@ -321,7 +378,7 @@ app.get('/api/my-recipes/:userId', verifyToken, async (req, res) => {
     // ==========================================
     // 🎯 ৭. অল রেসিপি গেট API (সার্চ, পেজিনেশন এবং অ্যাডমিন প্যানেল কম্বাইন্ড)
     // ==========================================
-    app.get('/api/recipes', async (req, res) => {
+    app.get('/api/recipes',  async (req, res) => {
       try {
         const page = req.query.page ? parseInt(req.query.page) : null;
         const limit = req.query.limit ? parseInt(req.query.limit) : null;
@@ -388,7 +445,7 @@ app.get('/api/my-recipes/:userId', verifyToken, async (req, res) => {
     // ==========================================
     // ৮. রেসিপি ডিটেইলস, আপডেট এবং ডিলিট API
     // ==========================================
-    app.get('/api/recipes/:id', async (req, res) => {
+    app.get('/api/recipes/:id',  async (req, res) => {
       try {
         const { id } = req.params;
         if (!ObjectId.isValid(id)) return res.status(400).json({ error: "Invalid ID" });
@@ -399,7 +456,7 @@ app.get('/api/my-recipes/:userId', verifyToken, async (req, res) => {
       }
     });
 
-    app.patch('/api/my-recipes/:id', async (req, res) => {
+    app.patch('/api/my-recipes/:id',  verifyToken, async (req, res) => {
       try {
         const { id } = req.params;
         const filter = { _id: new ObjectId(id) };
@@ -836,8 +893,8 @@ app.get('/api/popular-recipes', async (req, res) => {
 });
 
     // MongoDB Ping
-    await client.db("admin").command({ ping: 1 });
-    console.log("Successfully connected to MongoDB!");
+    // await client.db("admin").command({ ping: 1 });
+    // console.log("Successfully connected to MongoDB!");
   } catch (err) {
     console.error("Database connection failure:", err);
   }
