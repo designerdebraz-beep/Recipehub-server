@@ -648,9 +648,112 @@ app.post('/api/reports', async (req, res) => {
   }
 });
 
+// Start server site code
+
+// 🚀 Admin Stats কাউন্ট করার API এন্ডপয়েন্ট
+app.get('/api/admin-stats', async (req, res) => {
+  try {
+    // ১. টোটাল ইউজার সংখ্যা (usersCollection থেকে)
+    const totalUsers = await usersCollection.estimatedDocumentCount();
+
+    // ২. টোটাল রেসিপি সংখ্যা (recipescollection থেকে)
+    const totalRecipes = await recipescollection.estimatedDocumentCount();
+
+    // ৩. প্রিমিয়াম মেম্বার সংখ্যা (user কালেকশনে যাদের plan === 'premium' বা 'pro')
+    // আপনার প্রিমিয়াম ফিল্টারের লজিক অনুযায়ী কুয়েরি পরিবর্তন করতে পারেন
+    const premiumMembers = await usersCollection.countDocuments({ plan: "premium" });
+
+    // ৪. পেন্ডিং রিপোর্ট সংখ্যা (reportsCollection থেকে যাদের status === 'pending')
+    const pendingReports = await reportsCollection.countDocuments({ status: "pending" });
+
+    // ফ্রন্টএন্ডে ডাটা রেসপন্স পাঠানো হচ্ছে
+    return res.status(200).json({
+      success: true,
+      stats: {
+        totalUsers,
+        totalRecipes,
+        premiumMembers,
+        pendingReports
+      }
+    });
+
+  } catch (error) {
+    console.error("Backend Error fetching admin stats:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error while fetching admin stats."
+    });
+  }
+});
 
 
 
+// ----------------------------------------------------
+// ১. GET: ডাটাবেজ থেকে সব রিপোর্ট নিয়ে আসা
+// ----------------------------------------------------
+app.get('/api/reports', async (req, res) => {
+  try {
+    // ডাটাবেজের সব রিপোর্ট নতুন থেকে পুরাতন ক্রমানুসারে (Descending) নিয়ে আসবে
+    const result = await reportsCollection.find().sort({ createdAt: -1 }).toArray();
+    
+    return res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error("Error fetching reports:", error);
+    return res.status(500).json({ success: false, message: "Internal server error." });
+  }
+});
+
+// ----------------------------------------------------
+// ২. PATCH: রিপোর্টের স্ট্যাটাস 'dismissed' করা
+// ----------------------------------------------------
+app.patch('/api/reports/:id', async (req, res) => {
+  try {
+    const reportId = req.params.id;
+    
+    const filter = { _id: new ObjectId(reportId) };
+    const updateDoc = {
+      $set: { status: 'dismissed' } // ডাটাবেজে ছোট হাতের অক্ষরে আপডেট করা হচ্ছে
+    };
+
+    const result = await reportsCollection.updateOne(filter, updateDoc);
+
+    if (result.modifiedCount > 0) {
+      return res.status(200).json({ success: true, message: "Report dismissed successfully." });
+    } else {
+      return res.status(404).json({ success: false, message: "Report not found or already dismissed." });
+    }
+  } catch (error) {
+    console.error("Error dismissing report:", error);
+    return res.status(500).json({ success: false, message: "Internal server error." });
+  }
+});
+
+// ----------------------------------------------------
+// ৩. DELETE: রেসিপি এবং ঐ রেসিপির সমস্ত রিপোর্ট রিমুভ করা
+// ----------------------------------------------------
+app.delete('/api/recipes/:recipeId', async (req, res) => {
+  try {
+    const recipeId = req.params.recipeId;
+
+    // ক) প্রধান recipescollection থেকে রেসিপিটি ডিলিট করা
+    const recipeDeleteResult = await recipescollection.deleteOne({ _id: new ObjectId(recipeId) });
+
+    // খ) ঐ নির্দিষ্ট রেসিপির বিরুদ্ধে যতগুলো রিপোর্ট আছে, সব reportsCollection থেকে মুছে ফেলা
+    await reportsCollection.deleteMany({ recipeId: new ObjectId(recipeId) });
+
+    if (recipeDeleteResult.deletedCount > 0) {
+      return res.status(200).json({ success: true, message: "Recipe and its reports removed successfully." });
+    } else {
+      return res.status(404).json({ success: false, message: "Recipe not found." });
+    }
+  } catch (error) {
+    console.error("Error removing recipe:", error);
+    return res.status(500).json({ success: false, message: "Internal server error." });
+  }
+});
 
     // MongoDB Ping
     await client.db("admin").command({ ping: 1 });
