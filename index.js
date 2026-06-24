@@ -804,7 +804,17 @@ app.get('/api/admin/transactions', async (req, res) => {
 
 
 
-
+// ১. শুধুমাত্র ফিচারড রেসিপিগুলো গেট করার রুট
+app.get('/api/recipes/featured', async (req, res) => {
+  try {
+    // ডাটাবেজ থেকে শুধু { isFeatured: true } ফিল্টার করে ডাটা আনা হচ্ছে
+    const query = { isFeatured: true };
+    const result = await recipescollection.find(query).toArray();
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 
 
